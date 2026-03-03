@@ -1,3 +1,4 @@
+import { writeFileSync } from 'fs';
 import * as cheerio from 'cheerio';
 import { VisaHttpClient } from '../lib/client.js';
 import { getConfig } from '../lib/config.js';
@@ -7,6 +8,41 @@ import { log, sleep, isSocketHangupError } from '../lib/utils.js';
 const COOLDOWN = 3600; // 1 hour in seconds
 const MAX_RELOGINS = 3;
 const RELOGIN_DELAY = 5; // seconds to wait after re-login before fetching
+
+function isSignInPage(html) {
+  // Only match the actual sign-in form, not any page with "/en-" in it
+  return html.includes('id="sign_in_form"') ||
+         html.includes('action="/users/sign_in"') ||
+         html.includes('id="sign_in"');
+}
+
+function dumpHtml(html, label) {
+  const path = `debug-${label}-${Date.now()}.html`;
+  writeFileSync(path, html);
+  log(`Saved full response to ${path}`);
+}
+
+function parsePaymentPage(html, previousState, paymentUrl, config) {
+  const $ = cheerio.load(html);
+  const mainText = $('#main').text();
+  const noSlots = mainText.includes('There are no available appointments at this time');
+
+  if (noSlots) {
+    log('No payment slots available');
+    return 'no-slots';
+  } else if (previousState === 'no-slots') {
+    log('SLOTS AVAILABLE! Payment page is accessible!');
+    notify(
+      'US VISA PAYMENT SLOTS AVAILABLE!',
+      `Appointment slots are now available on the payment page.\n\nGo pay now: ${paymentUrl}`,
+      config
+    );
+    return 'slots-available';
+  } else {
+    log('Slots still available');
+    return previousState;
+  }
+}
 
 export async function paymentWatchCommand(options) {
   const config = getConfig();
@@ -19,6 +55,7 @@ export async function paymentWatchCommand(options) {
 
   let sessionHeaders = null;
   let previousState = 'no-slots';
+  let firstFetch = true;
 
   while (true) {
     try {
@@ -32,9 +69,15 @@ export async function paymentWatchCommand(options) {
       // Fetch payment page
       const html = await client.fetchPaymentPage(sessionHeaders, config.scheduleId);
 
-      // Detect session expiry — redirected to sign-in page
-      if (html.includes('id="sign_in"') || html.includes('action="/en-')) {
-        log(`Session expired. Response (first 500 chars):\n${html.substring(0, 500)}`);
+      // Save first response for debugging
+      if (firstFetch) {
+        dumpHtml(html, 'first-fetch');
+        firstFetch = false;
+      }
+
+      // Detect session expiry — redirected to actual sign-in page
+      if (isSignInPage(html)) {
+        dumpHtml(html, 'session-expired');
         let reloggedIn = false;
 
         for (let i = 1; i <= MAX_RELOGINS; i++) {
@@ -44,31 +87,13 @@ export async function paymentWatchCommand(options) {
           await sleep(RELOGIN_DELAY);
 
           const retryHtml = await client.fetchPaymentPage(sessionHeaders, config.scheduleId);
-          if (!retryHtml.includes('id="sign_in"') && !retryHtml.includes('action="/en-')) {
+          if (!isSignInPage(retryHtml)) {
             log('Page fetched successfully after re-login');
             reloggedIn = true;
-            // Parse this successful response instead of looping back
-            const $ = cheerio.load(retryHtml);
-            const mainText = $('#main').text();
-            const noSlots = mainText.includes('There are no available appointments at this time');
-
-            if (noSlots) {
-              log('No payment slots available');
-              previousState = 'no-slots';
-            } else if (previousState === 'no-slots') {
-              log('SLOTS AVAILABLE! Payment page is accessible!');
-              previousState = 'slots-available';
-              await notify(
-                'US VISA PAYMENT SLOTS AVAILABLE!',
-                `Appointment slots are now available on the payment page.\n\nGo pay now: ${paymentUrl}`,
-                config
-              );
-            } else {
-              log('Slots still available');
-            }
+            previousState = parsePaymentPage(retryHtml, previousState, paymentUrl, config);
             break;
           } else {
-            log(`Re-login attempt ${i} still got sign-in page. Response (first 500 chars):\n${retryHtml.substring(0, 500)}`);
+            dumpHtml(retryHtml, `retry-${i}`);
           }
         }
 
@@ -83,24 +108,7 @@ export async function paymentWatchCommand(options) {
       }
 
       // Parse page content
-      const $ = cheerio.load(html);
-      const mainText = $('#main').text();
-      const noSlots = mainText.includes('There are no available appointments at this time');
-
-      if (noSlots) {
-        log('No payment slots available');
-        previousState = 'no-slots';
-      } else if (previousState === 'no-slots') {
-        log('SLOTS AVAILABLE! Payment page is accessible!');
-        previousState = 'slots-available';
-        await notify(
-          'US VISA PAYMENT SLOTS AVAILABLE!',
-          `Appointment slots are now available on the payment page.\n\nGo pay now: ${paymentUrl}`,
-          config
-        );
-      } else {
-        log('Slots still available');
-      }
+      previousState = parsePaymentPage(html, previousState, paymentUrl, config);
 
       await sleep(delay);
     } catch (err) {
