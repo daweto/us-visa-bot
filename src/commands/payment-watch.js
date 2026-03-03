@@ -50,7 +50,7 @@ export async function paymentWatchCommand(options) {
         log('SLOTS AVAILABLE! Payment page is accessible!');
         previousState = 'slots-available';
 
-        const subject = 'US Visa Payment Slots Available!';
+        const subject = 'US VISA PAYMENT SLOTS AVAILABLE!';
         const body = `Appointment slots are now available on the payment page.\n\nGo pay now: ${paymentUrl}`;
         await notify(subject, body, config);
       } else {
