@@ -34,6 +34,7 @@ export async function paymentWatchCommand(options) {
 
       // Detect session expiry — redirected to sign-in page
       if (html.includes('id="sign_in"') || html.includes('action="/en-')) {
+        log(`Session expired. Response (first 500 chars):\n${html.substring(0, 500)}`);
         let reloggedIn = false;
 
         for (let i = 1; i <= MAX_RELOGINS; i++) {
@@ -44,6 +45,7 @@ export async function paymentWatchCommand(options) {
 
           const retryHtml = await client.fetchPaymentPage(sessionHeaders, config.scheduleId);
           if (!retryHtml.includes('id="sign_in"') && !retryHtml.includes('action="/en-')) {
+            log('Page fetched successfully after re-login');
             reloggedIn = true;
             // Parse this successful response instead of looping back
             const $ = cheerio.load(retryHtml);
@@ -65,6 +67,8 @@ export async function paymentWatchCommand(options) {
               log('Slots still available');
             }
             break;
+          } else {
+            log(`Re-login attempt ${i} still got sign-in page. Response (first 500 chars):\n${retryHtml.substring(0, 500)}`);
           }
         }
 
