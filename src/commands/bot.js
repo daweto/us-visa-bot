@@ -1,11 +1,12 @@
 import { Bot } from '../lib/bot.js';
-import { getConfig } from '../lib/config.js';
+import { getConfig, requireFacilityId } from '../lib/config.js';
 import { log, sleep, isSocketHangupError } from '../lib/utils.js';
 
 const COOLDOWN = 3600; // 1 hour in seconds
 
 export async function botCommand(options) {
   const config = getConfig();
+  requireFacilityId(config);
   const bot = new Bot(config, { dryRun: options.dryRun });
   let currentBookedDate = options.current;
   const targetDate = options.target;

@@ -2,6 +2,7 @@
 
 import { program } from 'commander';
 import { botCommand } from './commands/bot.js';
+import { paymentWatchCommand } from './commands/payment-watch.js';
 
 program
   .name('us-visa-bot')
@@ -16,6 +17,12 @@ program
   .option('-m, --min <date>', 'minimum date acceptable')
   .option('--dry-run', 'only log what would be booked without actually booking')
   .action(botCommand);
+
+program
+  .command('payment-watch')
+  .description('Monitor the payment page for available appointment slots')
+  .option('-d, --delay <seconds>', 'seconds between checks (default: PAYMENT_CHECK_DELAY or 600)')
+  .action(paymentWatchCommand);
 
 // Default command for backward compatibility
 program

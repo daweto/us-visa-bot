@@ -1,5 +1,5 @@
 import fetch from "node-fetch";
-import cheerio from 'cheerio';
+import * as cheerio from 'cheerio';
 import { log } from './utils.js';
 import { getBaseUri } from './config.js';
 
@@ -52,6 +52,20 @@ export class VisaHttpClient {
     
     return this._jsonRequest(url, headers)
       .then(data => data['business_times'][0] || data['available_times'][0]);
+  }
+
+  async fetchPaymentPage(headers, scheduleId) {
+    const url = `${this.baseUri}/schedule/${scheduleId}/payment`;
+
+    const res = await fetch(url, {
+      headers: {
+        ...headers,
+        "Accept": "text/html",
+      },
+      redirect: "follow",
+    });
+
+    return res.text();
   }
 
   async book(headers, scheduleId, facilityId, date, time) {
