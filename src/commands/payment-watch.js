@@ -5,6 +5,8 @@ import { notify } from '../lib/notifier.js';
 import { log, sleep, isSocketHangupError } from '../lib/utils.js';
 
 const COOLDOWN = 3600; // 1 hour in seconds
+const MAX_RELOGINS = 3;
+const RELOGIN_DELAY = 5; // seconds to wait after re-login before fetching
 
 export async function paymentWatchCommand(options) {
   const config = getConfig();
@@ -24,6 +26,7 @@ export async function paymentWatchCommand(options) {
       if (!sessionHeaders) {
         sessionHeaders = await client.login();
         log('Login successful');
+        await sleep(RELOGIN_DELAY);
       }
 
       // Fetch payment page
@@ -31,9 +34,47 @@ export async function paymentWatchCommand(options) {
 
       // Detect session expiry — redirected to sign-in page
       if (html.includes('id="sign_in"') || html.includes('action="/en-')) {
-        log('Session expired, re-logging in...');
-        sessionHeaders = await client.login();
-        log('Re-login successful');
+        let reloggedIn = false;
+
+        for (let i = 1; i <= MAX_RELOGINS; i++) {
+          log(`Session expired, re-login attempt ${i}/${MAX_RELOGINS}...`);
+          sessionHeaders = await client.login();
+          log('Re-login successful, waiting before fetch...');
+          await sleep(RELOGIN_DELAY);
+
+          const retryHtml = await client.fetchPaymentPage(sessionHeaders, config.scheduleId);
+          if (!retryHtml.includes('id="sign_in"') && !retryHtml.includes('action="/en-')) {
+            reloggedIn = true;
+            // Parse this successful response instead of looping back
+            const $ = cheerio.load(retryHtml);
+            const mainText = $('#main').text();
+            const noSlots = mainText.includes('There are no available appointments at this time');
+
+            if (noSlots) {
+              log('No payment slots available');
+              previousState = 'no-slots';
+            } else if (previousState === 'no-slots') {
+              log('SLOTS AVAILABLE! Payment page is accessible!');
+              previousState = 'slots-available';
+              await notify(
+                'US VISA PAYMENT SLOTS AVAILABLE!',
+                `Appointment slots are now available on the payment page.\n\nGo pay now: ${paymentUrl}`,
+                config
+              );
+            } else {
+              log('Slots still available');
+            }
+            break;
+          }
+        }
+
+        if (!reloggedIn) {
+          log(`Re-login failed ${MAX_RELOGINS} times. Cooling down ${COOLDOWN}s...`);
+          await sleep(COOLDOWN);
+          sessionHeaders = null;
+        }
+
+        await sleep(delay);
         continue;
       }
 
@@ -46,13 +87,13 @@ export async function paymentWatchCommand(options) {
         log('No payment slots available');
         previousState = 'no-slots';
       } else if (previousState === 'no-slots') {
-        // Slots just appeared!
         log('SLOTS AVAILABLE! Payment page is accessible!');
         previousState = 'slots-available';
-
-        const subject = 'US VISA PAYMENT SLOTS AVAILABLE!';
-        const body = `Appointment slots are now available on the payment page.\n\nGo pay now: ${paymentUrl}`;
-        await notify(subject, body, config);
+        await notify(
+          'US VISA PAYMENT SLOTS AVAILABLE!',
+          `Appointment slots are now available on the payment page.\n\nGo pay now: ${paymentUrl}`,
+          config
+        );
       } else {
         log('Slots still available');
       }
