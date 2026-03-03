@@ -1,4 +1,4 @@
-import { writeFileSync } from 'fs';
+import { writeFileSync, existsSync, mkdirSync } from 'fs';
 import * as cheerio from 'cheerio';
 import { VisaHttpClient } from '../lib/client.js';
 import { getConfig } from '../lib/config.js';
@@ -16,8 +16,14 @@ function isSignInPage(html) {
          html.includes('id="sign_in"');
 }
 
+const DEBUG_DIR = 'debug';
+
 function dumpHtml(html, label) {
-  const path = `debug-${label}-${Date.now()}.html`;
+
+  if (!existsSync(DEBUG_DIR)) {
+    mkdirSync(DEBUG_DIR, { recursive: true });
+  }
+  const path = `${DEBUG_DIR}/${Date.now()}-${label}.html`;
   writeFileSync(path, html);
   log(`Saved full response to ${path}`);
 }
